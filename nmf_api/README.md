@@ -1,0 +1,289 @@
+# Recomendaciones con NMF
+
+API sencilla para etiquetar ofertas con temas generados por NMF y recomendar segun intereses declarados.
+
+## Requisitos
+
+- Python 3.10+
+
+## Instalacion rapida
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+## Datos de entrada
+
+Por defecto se usan ambos archivos: [../classes.json](../classes.json) y [../vacantes.json](../vacantes.json). Si queres usar otro JSON o varios JSON, define:
+
+```bash
+export OFFER_DATA_PATH="/ruta/al/archivo.json"
+# o varios archivos separados por coma
+export OFFER_DATA_PATHS="/ruta/a/clases.json,/ruta/a/vacantes.json"
+```
+
+El JSON debe ser una lista de objetos (una oferta por elemento). Si se cargan varios archivos, las ofertas se combinan por `id_acao` (o por `id_anuncio_*` si no existe), y los campos faltantes se completan sin pisar valores ya existentes.
+
+## Correr la API
+
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+Si estas usando un venv en el repo:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+## Endpoints principales
+
+- `GET /tags` -> lista de etiquetas detectadas
+- `POST /recommend` -> ofertas recomendadas segun etiquetas
+- `POST /recommend/serendipity` -> recomendaciones con diversidad/novedad
+- `POST /recommend/user` -> recomendaciones segun intereses del usuario (fuente de verdad en el back)
+- `POST /train` -> reentrenar con nuevos parametros
+- `GET /offers` -> lista ofertas con tags
+- `GET /offers/active` -> lista ofertas activas con tags
+- `GET /offers/normalized` -> lista ofertas con modelo de salida normalizado
+- `GET /offers/brief` -> lista ofertas con titulo y descripcion
+- `POST /tag-offers` -> etiquetar ofertas nuevas con el modelo actual
+
+## Estructura del proyecto
+
+```
+recomendaciones/nmf_api/
+  app/
+    routes/
+      health.py
+      offers.py
+      recommendations.py
+    services/
+      interests_service.py
+      model_service.py
+    data_loader.py
+    deps.py
+    main.py
+    nmf_classifier.py
+    schemas.py
+    state.py
+  README.md
+  README.pt.md
+  requirements.txt
+```
+
+Resumen rapido:
+
+- `app/main.py`: crea la app e incluye routers.
+- `app/routes/`: endpoints HTTP.
+- `app/services/`: logica de negocio (modelo, intereses).
+- `app/nmf_classifier.py`: entrenamiento y scoring NMF.
+- `app/data_loader.py`: carga y merge de datos.
+- `app/schemas.py`: modelos Pydantic.
+
+## Ejemplos
+
+Listar etiquetas:
+
+```bash
+curl http://localhost:8000/tags
+```
+
+Recomendar ofertas usando etiquetas 0 y 2:
+
+```bash
+curl -X POST http://localhost:8000/recommend \
+  -H "Content-Type: application/json" \
+  -d '{"tag_ids": [0, 2], "limit": 5, "active_only": true, "require_tag_match": true}'
+```
+
+Recomendar por usuario (intereses en el back):
+
+```bash
+curl -X POST http://localhost:8000/recommend/user \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": 123, "limit": 5, "active_only": true}'
+```
+
+Recomendar con serendipity (diversidad):
+
+```bash
+curl -X POST http://localhost:8000/recommend/serendipity \
+  -H "Content-Type: application/json" \
+  -d '{"tag_ids": [0, 2], "limit": 5, "active_only": true, "diversity_lambda": 0.7}'
+```
+
+Reentrenar con 10 temas:
+
+```bash
+curl -X POST http://localhost:8000/train \
+  -H "Content-Type: application/json" \
+  -d '{"n_topics": 10, "max_features": 6000, "active_only": true}'
+```
+
+## Como dialoga el train con el modelo
+
+- El modelo se carga en el arranque con los datos actuales.
+- `POST /train` recalcula temas y actualiza en memoria el modelo y todas las etiquetas.
+- Si queres mantener etiquetas fijas para los usuarios, evita reentrenar y usa el mismo modelo para etiquetar nuevas ofertas.
+- Si reentrenas, las etiquetas pueden cambiar (ids y terminos) y deberias versionarlas.
+
+## Etiquetar ofertas nuevas sin reentrenar
+
+Para mantener las etiquetas fijas, usa el mismo modelo y etiqueta solo las ofertas nuevas con `POST /tag-offers`.
+
+1. Extrae las ofertas nuevas desde tu fuente.
+2. Envia esas ofertas al endpoint `/tag-offers`.
+3. Guarda `tags` y `tag_labels` en tu base.
+
+Ejemplo:
+
+```bash
+curl -X POST http://localhost:8000/tag-offers \
+  -H "Content-Type: application/json" \
+  -d '{"items": [{"id_acao": "ABC", "titulo": "Oferta nueva", "resumo": "Texto"}]}'
+```
+
+## Ingesta a base de datos
+
+Una forma simple de poblar la base es consumir `GET /offers/normalized` y hacer upsert por `offer_id`:
+
+1. Llamar a `/offers/normalized?limit=200&offset=0`
+2. Guardar campos normalizados y `tags`
+3. Repetir con `offset` hasta completar
+
+Ejemplo con paginado:
+
+```bash
+curl "http://localhost:8000/offers/normalized?limit=200&offset=0"
+```
+
+Si queres almacenar etiquetas, guarda `tags` y (opcional) `is_active` en la tabla de ofertas.
+
+Listar ofertas activas (inscripciones vigentes):
+
+```bash
+curl "http://localhost:8000/offers/active?limit=20&offset=0"
+```
+
+Listar ofertas normalizadas:
+
+```bash
+curl "http://localhost:8000/offers/normalized?limit=20&offset=0&tag_ids=2&tag_ids=5"
+```
+
+Listar titulo y descripcion:
+
+```bash
+curl "http://localhost:8000/offers/brief?limit=20&offset=0&tag_ids=2&tag_ids=5"
+```
+
+## Notas sobre el algoritmo
+
+- Se arma un corpus con campos como `titulo`, `resumo`, `descricao`, `objetivos` y areas.
+- Se genera una matriz TF-IDF y se entrena un modelo NMF.
+- Cada tema se resume con sus terminos mas relevantes y se usa como etiqueta.
+- Para cada oferta se seleccionan temas con peso alto; si no hay, se usan los top-K.
+
+## Reentrenos programados
+
+Para reentrenar con nuevas ofertas sin bloquear la API, podes programar un job externo que llame a `POST /train`.
+Ejemplo cron diario a las 03:00:
+
+```bash
+0 3 * * * curl -X POST http://localhost:8000/train -H "Content-Type: application/json" -d '{"n_topics": 20, "active_only": true}'
+```
+
+Si queres mantener estables las etiquetas para los usuarios, evita reentrenar y usa el mismo modelo para etiquetar ofertas nuevas.
+
+## Intereses de usuario (fuente de verdad en el back)
+
+El back calcula los intereses consultando la base y transforma esos intereses a `tag_ids`.
+El endpoint `POST /recommend/user` usa ese listado y llama al mismo motor que `POST /recommend`.
+
+Se asume una tabla `interests` con `id` y `tag_id` (FK a los ids de tags del modelo).
+La relacion usuario-interes se guarda en `user_cs_interests_list`:
+
+- `user_cs`: usuarios, clave `id`.
+- `user_cs_interests_list`: `entity_user_id`, `interests_list_id`.
+- `interests`: `id`, `tag_id`.
+
+Consulta por defecto (configurable con `USER_INTERESTS_SQL`):
+
+```sql
+SELECT i.tag_id
+FROM user_cs_interests_list u
+JOIN interests i ON i.id = u.interests_list_id
+WHERE u.entity_user_id = %s
+```
+
+Para activar el lookup hay que definir `DATABASE_URL` (Postgres). Si usan otro motor,
+reemplaza la funcion `fetch_user_tag_ids` y/o el SQL por la version correspondiente.
+
+### Postgres y porque no conviene mandar intereses desde el front
+
+Si el motor es Postgres, lo ideal es que el back sea la fuente de verdad de intereses:
+
+- Evitas que el front tenga que conocer ids internos de intereses y tags.
+- Centralizas validacion y versionado de etiquetas en el back.
+- Evitas inconsistencias si el front envia intereses desactualizados.
+
+Si aun queres soportar que el front envie intereses, podes usar `POST /recommend` con `tag_ids`,
+pero perdes trazabilidad y consistencia con la base. Recomendado: mantener `POST /recommend/user`
+como camino principal y usar `POST /recommend` solo para pruebas.
+
+## Checklist de integracion para dejarlo operativo
+
+### Datos y tablas
+
+- Tabla `user_cs`: existe `id` como PK.
+- Tabla `user_cs_interests_list`: `entity_user_id`, `interests_list_id`.
+- Tabla `interests`: `id`, `tag_id` (FK a ids de tags del modelo).
+- `tag_id` debe mapear a los ids actuales del modelo; si se reentrena, versionar o actualizar.
+
+### Pipeline de datos
+
+- Mantener el modelo estable si los usuarios ya tienen intereses asignados a tags.
+- Si se reentrena, recalcular `tag_id` en `interests` o versionar tags.
+- Al cargar ofertas nuevas, usar `POST /tag-offers` para mantener tags consistentes.
+
+### API y configuracion
+
+- Implementar `_fetch_user_tag_ids` con Postgres y definir credenciales/DSN.
+- Ajustar `USER_INTERESTS_SQL` si el esquema difiere.
+- Asegurar que la API tenga acceso de lectura a las tablas de intereses.
+
+### Validaciones recomendadas
+
+- Verificar que todos los `tag_id` de `interests` existan en `/tags`.
+- Si un usuario no tiene intereses, devolver lista vacia sin error.
+- Mantener `require_tag_match=true` para coherencia entre intereses y resultados.
+
+## OneSignal (notificaciones)
+
+Estado actual:
+
+- No implementado.
+- Sin modulo ni endpoint.
+
+Pendientes:
+
+- Definir `external_user_id`.
+- Definir credenciales de OneSignal.
+- Definir modelo de datos para dispositivos.
+- Crear endpoint de envio.
+- Definir dedupe.
+- Considerar rate limits.
+
+Variables de entorno esperadas:
+
+- `ONESIGNAL_APP_ID`
+- `ONESIGNAL_API_KEY`
+- `ONESIGNAL_API_URL` (opcional, default del provider)
+- `ONESIGNAL_DRY_RUN` (opcional)
