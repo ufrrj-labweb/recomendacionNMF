@@ -42,6 +42,37 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
+## Docker
+
+Build de la imagen:
+
+```bash
+docker build -t nmf-api .
+```
+
+Run:
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e DATABASE_URL="postgresql://user:pass@host:5432/db" \
+  -e ONESIGNAL_APP_ID="..." \
+  -e ONESIGNAL_API_KEY="..." \
+  nmf-api
+```
+
+## Docker Compose
+
+Levantar API + Postgres:
+
+```bash
+docker compose up --build
+```
+
+Notas:
+
+- Usa `../classes.json` y `../vacantes.json` como volumenes en `/data`.
+- Ajusta las credenciales y variables en `docker-compose.yml`.
+
 ## Endpoints principales
 
 - `GET /tags` -> lista de etiquetas detectadas
@@ -54,6 +85,105 @@ uvicorn app.main:app --reload --port 8000
 - `GET /offers/normalized` -> lista ofertas con modelo de salida normalizado
 - `GET /offers/brief` -> lista ofertas con titulo y descripcion
 - `POST /tag-offers` -> etiquetar ofertas nuevas con el modelo actual
+- `POST /notifications/offers/brief` -> enviar notificacion con ofertas brief
+- `POST /notifications/send` -> envio general a OneSignal
+- `POST /notifications/offers/class` -> notificar usuarios segun intereses de la oferta
+
+## Endpoints de notificaciones (detalle)
+
+### POST /notifications/offers/brief
+
+Que hace:
+
+- Obtiene los intereses del usuario desde la base.
+- Recomienda ofertas y arma un mensaje breve con titulo/descripcion.
+- Envia la notificacion a OneSignal usando `external_user_id` = `user_id`.
+
+Recibe:
+
+```json
+{
+  "user_id": 123,
+  "limit": 5,
+  "min_score": 0.0,
+  "active_only": false,
+  "require_tag_match": true,
+  "heading": "Nuevas ofertas",
+  "dry_run": false
+}
+```
+
+Devuelve:
+
+```json
+{
+  "total": 2,
+  "items": [
+    {"offer_id": "A1", "title": "...", "description": "..."}
+  ],
+  "onesignal": {"id": "..."}
+}
+```
+
+### POST /notifications/send
+
+Que hace:
+
+- Envia una notificacion generica a OneSignal.
+- Requiere al menos uno de `external_user_ids`, `included_segments` o `filters`.
+
+Recibe:
+
+```json
+{
+  "external_user_ids": ["123"],
+  "included_segments": ["All"],
+  "filters": [{"field": "tag", "key": "vip", "relation": "=", "value": "1"}],
+  "headings": {"es": "Titulo"},
+  "contents": {"es": "Mensaje"},
+  "data": {"url": "https://..."},
+  "dry_run": false
+}
+```
+
+Devuelve:
+
+```json
+{"onesignal": {"id": "..."}}
+```
+
+### POST /notifications/offers/class
+
+Que hace:
+
+- Busca `interest_id` de la oferta en `class_interest`.
+- Resuelve usuarios en `user_cs_interests_list`.
+- Aplica dedupe por `(class_id, user_id)` usando `notifications_sent`.
+- Envia OneSignal a esos usuarios usando `user_cs.id` como `external_user_id`.
+- Si no recibe `heading`/`content`, arma el brief con `extension_class`.
+
+Recibe:
+
+```json
+{
+  "class_id": 999,
+  "heading": "Nueva oferta",
+  "content": "Se abrio una oferta...",
+  "interest_ids": [1, 2, 3],
+  "data": {"class_id": 999},
+  "dry_run": false
+}
+```
+
+Devuelve:
+
+```json
+{
+  "total_users": 42,
+  "interest_ids": [1, 2, 3],
+  "onesignal": {"id": "..."}
+}
+```
 
 ## Estructura del proyecto
 
@@ -133,6 +263,23 @@ curl -X POST http://localhost:8000/train \
 - `POST /train` recalcula temas y actualiza en memoria el modelo y todas las etiquetas.
 - Si queres mantener etiquetas fijas para los usuarios, evita reentrenar y usa el mismo modelo para etiquetar nuevas ofertas.
 - Si reentrenas, las etiquetas pueden cambiar (ids y terminos) y deberias versionarlas.
+
+### Parametros del entrenamiento inicial
+
+El entrenamiento inicial usa los defaults de `TaggerConfig` en [app/nmf_classifier.py](recomendaciones/nmf_api/app/nmf_classifier.py),
+invocados en `startup_model` de [app/services/model_service.py](recomendaciones/nmf_api/app/services/model_service.py).
+Para cambiarlos en runtime, usa `POST /train` con esos mismos parametros.
+
+Impacto por parametro (a mayor valor / a menor valor):
+
+- `n_topics`: mas temas = mayor granularidad, mas etiquetas; menos temas = etiquetas mas generales.
+- `max_features`: mas vocabulario = mas detalle, mayor costo; menos vocabulario = mas ruido filtrado, menor detalle.
+- `min_df`: mas alto = elimina terminos raros, mas estabilidad; mas bajo = conserva terminos raros, mas ruido.
+- `max_df`: mas bajo = elimina terminos muy frecuentes, mas foco; mas alto = deja terminos comunes, menos discriminacion.
+- `ngram_range`: incluir bigramas mejora frases, pero sube costo y sparsity.
+- `top_terms`: mas terminos por tema = etiquetas mas largas; menos terminos = etiquetas mas cortas.
+- `topic_threshold`: mas alto = menos tags por oferta; mas bajo = mas tags por oferta.
+- `top_k`: mas alto = mas tags cuando no hay umbral; mas bajo = menos tags forzados.
 
 ## Etiquetar ofertas nuevas sin reentrenar
 
@@ -255,8 +402,9 @@ como camino principal y usar `POST /recommend` solo para pruebas.
 
 ### API y configuracion
 
-- Implementar `_fetch_user_tag_ids` con Postgres y definir credenciales/DSN.
+- Implementar `fetch_user_tag_ids` con Postgres y definir credenciales/DSN.
 - Ajustar `USER_INTERESTS_SQL` si el esquema difiere.
+- Ajustar `CLASS_INTERESTS_SQL` y `USERS_BY_INTERESTS_SQL` si el esquema difiere.
 - Asegurar que la API tenga acceso de lectura a las tablas de intereses.
 
 ### Validaciones recomendadas
@@ -269,15 +417,14 @@ como camino principal y usar `POST /recommend` solo para pruebas.
 
 Estado actual:
 
-- No implementado.
-- Sin modulo ni endpoint.
+- Implementado `POST /notifications/offers/brief`.
+- Implementado `POST /notifications/send`.
 
 Pendientes:
 
 - Definir `external_user_id`.
-- Definir credenciales de OneSignal.
+- Configurar credenciales de OneSignal.
 - Definir modelo de datos para dispositivos.
-- Crear endpoint de envio.
 - Definir dedupe.
 - Considerar rate limits.
 
@@ -287,3 +434,36 @@ Variables de entorno esperadas:
 - `ONESIGNAL_API_KEY`
 - `ONESIGNAL_API_URL` (opcional, default del provider)
 - `ONESIGNAL_DRY_RUN` (opcional)
+- `ONESIGNAL_LANG` (opcional)
+- `NOTIFICATIONS_DEDUPE_SQL` (opcional)
+
+### Endpoint de envio general
+
+La info que compartiste sirve como referencia de flujo: validar payload, enviar a OneSignal,
+y luego persistir/registrar en base. En este proyecto se implementa el endpoint
+`POST /notifications/send` que acepta:
+
+- `headings` y `contents` (por idioma)
+- `external_user_ids` o `included_segments` o `filters` (al menos uno)
+- `data` opcional (para deep links o metadata)
+
+Y devuelve la respuesta de OneSignal. Si queres persistir/auditar, hay que sumar
+una tabla y registrar el envio.
+
+### Notificacion por intereses de una oferta
+
+`POST /notifications/offers/class` toma `class_id` y consulta `class_interest` para
+obtener los `interest_id` (que son los `tag_id` del modelo). Luego consulta
+`user_cs_interests_list` para resolver usuarios y envia OneSignal usando `user_cs.id`
+como `external_user_id`. Si no se envia `heading`/`content`, se arma con el brief
+de la oferta via `CLASS_BRIEF_SQL`.
+
+Dedupe (recomendado): crear la tabla `notifications_sent` con clave unica `(class_id, user_id)`
+y usar el insert con `ON CONFLICT DO NOTHING` para evitar reenvios.
+
+Variables SQL opcionales:
+
+- `CLASS_INTERESTS_SQL`
+- `USERS_BY_INTERESTS_SQL`
+- `NOTIFICATIONS_DEDUPE_SQL`
+- `CLASS_BRIEF_SQL`
