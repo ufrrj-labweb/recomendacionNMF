@@ -497,6 +497,8 @@ de la oferta via `CLASS_BRIEF_SQL`.
 Dedupe (recomendado): crear la tabla `notifications_sent` con clave unica `(class_id, user_id)`
 y usar el insert con `ON CONFLICT DO NOTHING` para evitar reenvios.
 
+DDL sugerido en [db/notifications_sent.sql](recomendaciones/nmf_api/db/notifications_sent.sql).
+
 Variables SQL opcionales:
 
 - `CLASS_INTERESTS_SQL`
