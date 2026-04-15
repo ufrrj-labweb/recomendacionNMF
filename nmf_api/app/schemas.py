@@ -155,3 +155,18 @@ class NotificationSendRequest(BaseModel):
 
 class NotificationSendResponse(BaseModel):
     onesignal: dict
+
+
+class NotificationClassOfferRequest(BaseModel):
+    class_id: int = Field(..., ge=1)
+    heading: str
+    content: str
+    interest_ids: list[int] | None = None
+    data: dict | None = None
+    dry_run: bool = False
+
+
+class NotificationClassOfferResponse(BaseModel):
+    total_users: int
+    interest_ids: list[int]
+    onesignal: dict

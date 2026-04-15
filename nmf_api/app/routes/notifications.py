@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Depends
 
 from ..deps import get_tagger
@@ -7,10 +9,17 @@ from ..nmf_classifier import NmfTagger
 from ..schemas import (
     NotificationOffersRequest,
     NotificationOffersResponse,
+    NotificationClassOfferRequest,
+    NotificationClassOfferResponse,
     NotificationSendRequest,
     NotificationSendResponse,
 )
-from ..services.interests_service import fetch_user_tag_ids
+from ..services.interests_service import (
+    fetch_interest_ids_by_class_id,
+    fetch_user_ids_by_interest_ids,
+    fetch_user_tag_ids,
+    filter_new_user_ids,
+)
 from ..services.onesignal_service import send_notification, send_notification_raw
 
 router = APIRouter()
@@ -108,3 +117,48 @@ def send_notification_general(
         dry_run=payload.dry_run,
     )
     return NotificationSendResponse(onesignal=onesignal)
+
+
+@router.post(
+    "/notifications/offers/class",
+    response_model=NotificationClassOfferResponse,
+)
+def notify_users_by_class(
+    payload: NotificationClassOfferRequest,
+) -> NotificationClassOfferResponse:
+    interest_ids = payload.interest_ids
+    if interest_ids is None:
+        interest_ids = fetch_interest_ids_by_class_id(payload.class_id)
+
+    if not interest_ids:
+        return NotificationClassOfferResponse(
+            total_users=0, interest_ids=[], onesignal={}
+        )
+
+    user_ids = fetch_user_ids_by_interest_ids(interest_ids)
+    if not user_ids:
+        return NotificationClassOfferResponse(
+            total_users=0, interest_ids=interest_ids, onesignal={}
+        )
+
+    user_ids = filter_new_user_ids(payload.class_id, user_ids)
+    if not user_ids:
+        return NotificationClassOfferResponse(
+            total_users=0, interest_ids=interest_ids, onesignal={}
+        )
+
+    lang = os.getenv("ONESIGNAL_LANG", "es")
+
+    onesignal = send_notification_raw(
+        external_user_ids=[str(uid) for uid in user_ids],
+        headings={lang: payload.heading},
+        contents={lang: payload.content},
+        data=payload.data,
+        dry_run=payload.dry_run,
+    )
+
+    return NotificationClassOfferResponse(
+        total_users=len(user_ids),
+        interest_ids=interest_ids,
+        onesignal=onesignal,
+    )

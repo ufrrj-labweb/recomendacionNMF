@@ -42,6 +42,44 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
+## Docker
+
+Build de la imagen:
+
+```bash
+docker build -t nmf-api .
+```
+
+Run:
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e DATABASE_URL="postgresql://user:pass@host:5432/db" \
+  -e ONESIGNAL_APP_ID="..." \
+  -e ONESIGNAL_API_KEY="..." \
+  nmf-api
+```
+
+## Docker Compose
+
+Levantar API + Postgres:
+
+```bash
+docker compose up --build
+```
+
+Atajo:
+
+```bash
+chmod +x run.sh
+./run.sh
+```
+
+Notas:
+
+- Usa `../classes.json` y `../vacantes.json` como volumenes en `/data`.
+- Ajusta las credenciales y variables en `docker-compose.yml`.
+
 ## Endpoints principales
 
 - `GET /tags` -> lista de etiquetas detectadas
@@ -56,6 +94,7 @@ uvicorn app.main:app --reload --port 8000
 - `POST /tag-offers` -> etiquetar ofertas nuevas con el modelo actual
 - `POST /notifications/offers/brief` -> enviar notificacion con ofertas brief
 - `POST /notifications/send` -> envio general a OneSignal
+- `POST /notifications/offers/class` -> notificar usuarios segun intereses de la oferta
 
 ## Estructura del proyecto
 
@@ -276,6 +315,7 @@ como camino principal y usar `POST /recommend` solo para pruebas.
 
 - Implementar `fetch_user_tag_ids` con Postgres y definir credenciales/DSN.
 - Ajustar `USER_INTERESTS_SQL` si el esquema difiere.
+- Ajustar `CLASS_INTERESTS_SQL` y `USERS_BY_INTERESTS_SQL` si el esquema difiere.
 - Asegurar que la API tenga acceso de lectura a las tablas de intereses.
 
 ### Validaciones recomendadas
@@ -306,6 +346,7 @@ Variables de entorno esperadas:
 - `ONESIGNAL_API_URL` (opcional, default del provider)
 - `ONESIGNAL_DRY_RUN` (opcional)
 - `ONESIGNAL_LANG` (opcional)
+- `NOTIFICATIONS_DEDUPE_SQL` (opcional)
 
 ### Endpoint de envio general
 
@@ -319,3 +360,19 @@ y luego persistir/registrar en base. En este proyecto se implementa el endpoint
 
 Y devuelve la respuesta de OneSignal. Si queres persistir/auditar, hay que sumar
 una tabla y registrar el envio.
+
+### Notificacion por intereses de una oferta
+
+`POST /notifications/offers/class` toma `class_id` y consulta `class_interest` para
+obtener los `interest_id` (que son los `tag_id` del modelo). Luego consulta
+`user_cs_interests_list` para resolver usuarios y envia OneSignal usando `user_cs.id`
+como `external_user_id`.
+
+Dedupe (recomendado): crear la tabla `notifications_sent` con clave unica `(class_id, user_id)`
+y usar el insert con `ON CONFLICT DO NOTHING` para evitar reenvios.
+
+Variables SQL opcionales:
+
+- `CLASS_INTERESTS_SQL`
+- `USERS_BY_INTERESTS_SQL`
+- `NOTIFICATIONS_DEDUPE_SQL`
