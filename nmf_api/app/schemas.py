@@ -119,3 +119,39 @@ class TaggedOfferItem(BaseModel):
 class TagOffersResponse(BaseModel):
     total: int
     items: list[TaggedOfferItem]
+
+
+class NotificationOffersRequest(BaseModel):
+    user_id: int = Field(..., ge=1)
+    limit: int = Field(5, ge=1, le=20)
+    min_score: float = Field(0.0, ge=0.0)
+    active_only: bool = False
+    require_tag_match: bool = True
+    heading: str | None = None
+    dry_run: bool = False
+
+
+class NotificationOfferItem(BaseModel):
+    offer_id: str | None = None
+    title: str | None = None
+    description: str | None = None
+
+
+class NotificationOffersResponse(BaseModel):
+    total: int
+    items: list[NotificationOfferItem]
+    onesignal: dict
+
+
+class NotificationSendRequest(BaseModel):
+    external_user_ids: list[str] | None = None
+    included_segments: list[str] | None = None
+    filters: list[dict] | None = None
+    headings: dict[str, str]
+    contents: dict[str, str]
+    data: dict | None = None
+    dry_run: bool = False
+
+
+class NotificationSendResponse(BaseModel):
+    onesignal: dict

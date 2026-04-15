@@ -54,6 +54,8 @@ uvicorn app.main:app --reload --port 8000
 - `GET /offers/normalized` -> lista ofertas con modelo de salida normalizado
 - `GET /offers/brief` -> lista ofertas con titulo y descripcion
 - `POST /tag-offers` -> etiquetar ofertas nuevas con el modelo actual
+- `POST /notifications/offers/brief` -> enviar notificacion con ofertas brief
+- `POST /notifications/send` -> envio general a OneSignal
 
 ## Estructura del proyecto
 
@@ -133,6 +135,23 @@ curl -X POST http://localhost:8000/train \
 - `POST /train` recalcula temas y actualiza en memoria el modelo y todas las etiquetas.
 - Si queres mantener etiquetas fijas para los usuarios, evita reentrenar y usa el mismo modelo para etiquetar nuevas ofertas.
 - Si reentrenas, las etiquetas pueden cambiar (ids y terminos) y deberias versionarlas.
+
+### Parametros del entrenamiento inicial
+
+El entrenamiento inicial usa los defaults de `TaggerConfig` en [app/nmf_classifier.py](recomendaciones/nmf_api/app/nmf_classifier.py),
+invocados en `startup_model` de [app/services/model_service.py](recomendaciones/nmf_api/app/services/model_service.py).
+Para cambiarlos en runtime, usa `POST /train` con esos mismos parametros.
+
+Impacto por parametro (a mayor valor / a menor valor):
+
+- `n_topics`: mas temas = mayor granularidad, mas etiquetas; menos temas = etiquetas mas generales.
+- `max_features`: mas vocabulario = mas detalle, mayor costo; menos vocabulario = mas ruido filtrado, menor detalle.
+- `min_df`: mas alto = elimina terminos raros, mas estabilidad; mas bajo = conserva terminos raros, mas ruido.
+- `max_df`: mas bajo = elimina terminos muy frecuentes, mas foco; mas alto = deja terminos comunes, menos discriminacion.
+- `ngram_range`: incluir bigramas mejora frases, pero sube costo y sparsity.
+- `top_terms`: mas terminos por tema = etiquetas mas largas; menos terminos = etiquetas mas cortas.
+- `topic_threshold`: mas alto = menos tags por oferta; mas bajo = mas tags por oferta.
+- `top_k`: mas alto = mas tags cuando no hay umbral; mas bajo = menos tags forzados.
 
 ## Etiquetar ofertas nuevas sin reentrenar
 
@@ -255,7 +274,7 @@ como camino principal y usar `POST /recommend` solo para pruebas.
 
 ### API y configuracion
 
-- Implementar `_fetch_user_tag_ids` con Postgres y definir credenciales/DSN.
+- Implementar `fetch_user_tag_ids` con Postgres y definir credenciales/DSN.
 - Ajustar `USER_INTERESTS_SQL` si el esquema difiere.
 - Asegurar que la API tenga acceso de lectura a las tablas de intereses.
 
@@ -269,15 +288,14 @@ como camino principal y usar `POST /recommend` solo para pruebas.
 
 Estado actual:
 
-- No implementado.
-- Sin modulo ni endpoint.
+- Implementado `POST /notifications/offers/brief`.
+- Implementado `POST /notifications/send`.
 
 Pendientes:
 
 - Definir `external_user_id`.
-- Definir credenciales de OneSignal.
+- Configurar credenciales de OneSignal.
 - Definir modelo de datos para dispositivos.
-- Crear endpoint de envio.
 - Definir dedupe.
 - Considerar rate limits.
 
@@ -287,3 +305,17 @@ Variables de entorno esperadas:
 - `ONESIGNAL_API_KEY`
 - `ONESIGNAL_API_URL` (opcional, default del provider)
 - `ONESIGNAL_DRY_RUN` (opcional)
+- `ONESIGNAL_LANG` (opcional)
+
+### Endpoint de envio general
+
+La info que compartiste sirve como referencia de flujo: validar payload, enviar a OneSignal,
+y luego persistir/registrar en base. En este proyecto se implementa el endpoint
+`POST /notifications/send` que acepta:
+
+- `headings` y `contents` (por idioma)
+- `external_user_ids` o `included_segments` o `filters` (al menos uno)
+- `data` opcional (para deep links o metadata)
+
+Y devuelve la respuesta de OneSignal. Si queres persistir/auditar, hay que sumar
+una tabla y registrar el envio.

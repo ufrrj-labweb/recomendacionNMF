@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from .routes import health, offers, recommendations
+from .routes import health, notifications, offers, recommendations
 from .services.model_service import startup_model
 from .state import STATE
 
@@ -17,3 +17,4 @@ def startup() -> None:
 app.include_router(health.router)
 app.include_router(recommendations.router)
 app.include_router(offers.router)
+app.include_router(notifications.router)
