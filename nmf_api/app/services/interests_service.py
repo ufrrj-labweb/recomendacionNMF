@@ -24,6 +24,12 @@ FROM user_cs_interests_list
 WHERE interests_list_id = ANY(%s)
 """
 
+DEFAULT_CLASS_BRIEF_SQL = """
+SELECT titulo, descricao
+FROM extension_class
+WHERE id = %s
+"""
+
 DEFAULT_DEDUPE_INSERT_SQL = """
 INSERT INTO notifications_sent (class_id, user_id)
 SELECT %s, unnest(%s::int[])
@@ -105,6 +111,35 @@ def fetch_user_ids_by_interest_ids(interest_ids: list[int]) -> list[int]:
         ) from exc
 
     return [int(row[0]) for row in rows]
+
+
+def fetch_class_brief(class_id: int) -> tuple[str | None, str | None]:
+    dsn = os.getenv("DATABASE_URL")
+    if not dsn:
+        raise HTTPException(
+            status_code=400,
+            detail="Configura DATABASE_URL para buscar oferta",
+        )
+
+    query = os.getenv("CLASS_BRIEF_SQL", DEFAULT_CLASS_BRIEF_SQL)
+
+    try:
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (class_id,))
+                row = cur.fetchone()
+    except psycopg.Error as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al consultar oferta: {exc}",
+        ) from exc
+
+    if not row:
+        return None, None
+
+    title = row[0] if row[0] else None
+    description = row[1] if row[1] else None
+    return title, description
 
 
 def filter_new_user_ids(class_id: int, user_ids: list[int]) -> list[int]:

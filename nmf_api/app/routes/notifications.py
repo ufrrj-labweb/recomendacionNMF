@@ -15,6 +15,7 @@ from ..schemas import (
     NotificationSendResponse,
 )
 from ..services.interests_service import (
+    fetch_class_brief,
     fetch_interest_ids_by_class_id,
     fetch_user_ids_by_interest_ids,
     fetch_user_tag_ids,
@@ -141,6 +142,14 @@ def notify_users_by_class(
             total_users=0, interest_ids=interest_ids, onesignal={}
         )
 
+    heading = payload.heading
+    content = payload.content
+    if not heading or not content:
+        title, description = fetch_class_brief(payload.class_id)
+        heading = heading or title or "Nueva oferta"
+        if not content:
+            content = description or heading
+
     user_ids = filter_new_user_ids(payload.class_id, user_ids)
     if not user_ids:
         return NotificationClassOfferResponse(
@@ -151,8 +160,8 @@ def notify_users_by_class(
 
     onesignal = send_notification_raw(
         external_user_ids=[str(uid) for uid in user_ids],
-        headings={lang: payload.heading},
-        contents={lang: payload.content},
+        headings={lang: heading},
+        contents={lang: content},
         data=payload.data,
         dry_run=payload.dry_run,
     )

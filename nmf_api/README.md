@@ -68,13 +68,6 @@ Levantar API + Postgres:
 docker compose up --build
 ```
 
-Atajo:
-
-```bash
-chmod +x run.sh
-./run.sh
-```
-
 Notas:
 
 - Usa `../classes.json` y `../vacantes.json` como volumenes en `/data`.
@@ -95,6 +88,102 @@ Notas:
 - `POST /notifications/offers/brief` -> enviar notificacion con ofertas brief
 - `POST /notifications/send` -> envio general a OneSignal
 - `POST /notifications/offers/class` -> notificar usuarios segun intereses de la oferta
+
+## Endpoints de notificaciones (detalle)
+
+### POST /notifications/offers/brief
+
+Que hace:
+
+- Obtiene los intereses del usuario desde la base.
+- Recomienda ofertas y arma un mensaje breve con titulo/descripcion.
+- Envia la notificacion a OneSignal usando `external_user_id` = `user_id`.
+
+Recibe:
+
+```json
+{
+  "user_id": 123,
+  "limit": 5,
+  "min_score": 0.0,
+  "active_only": false,
+  "require_tag_match": true,
+  "heading": "Nuevas ofertas",
+  "dry_run": false
+}
+```
+
+Devuelve:
+
+```json
+{
+  "total": 2,
+  "items": [
+    {"offer_id": "A1", "title": "...", "description": "..."}
+  ],
+  "onesignal": {"id": "..."}
+}
+```
+
+### POST /notifications/send
+
+Que hace:
+
+- Envia una notificacion generica a OneSignal.
+- Requiere al menos uno de `external_user_ids`, `included_segments` o `filters`.
+
+Recibe:
+
+```json
+{
+  "external_user_ids": ["123"],
+  "included_segments": ["All"],
+  "filters": [{"field": "tag", "key": "vip", "relation": "=", "value": "1"}],
+  "headings": {"es": "Titulo"},
+  "contents": {"es": "Mensaje"},
+  "data": {"url": "https://..."},
+  "dry_run": false
+}
+```
+
+Devuelve:
+
+```json
+{"onesignal": {"id": "..."}}
+```
+
+### POST /notifications/offers/class
+
+Que hace:
+
+- Busca `interest_id` de la oferta en `class_interest`.
+- Resuelve usuarios en `user_cs_interests_list`.
+- Aplica dedupe por `(class_id, user_id)` usando `notifications_sent`.
+- Envia OneSignal a esos usuarios usando `user_cs.id` como `external_user_id`.
+- Si no recibe `heading`/`content`, arma el brief con `extension_class`.
+
+Recibe:
+
+```json
+{
+  "class_id": 999,
+  "heading": "Nueva oferta",
+  "content": "Se abrio una oferta...",
+  "interest_ids": [1, 2, 3],
+  "data": {"class_id": 999},
+  "dry_run": false
+}
+```
+
+Devuelve:
+
+```json
+{
+  "total_users": 42,
+  "interest_ids": [1, 2, 3],
+  "onesignal": {"id": "..."}
+}
+```
 
 ## Estructura del proyecto
 
@@ -366,7 +455,8 @@ una tabla y registrar el envio.
 `POST /notifications/offers/class` toma `class_id` y consulta `class_interest` para
 obtener los `interest_id` (que son los `tag_id` del modelo). Luego consulta
 `user_cs_interests_list` para resolver usuarios y envia OneSignal usando `user_cs.id`
-como `external_user_id`.
+como `external_user_id`. Si no se envia `heading`/`content`, se arma con el brief
+de la oferta via `CLASS_BRIEF_SQL`.
 
 Dedupe (recomendado): crear la tabla `notifications_sent` con clave unica `(class_id, user_id)`
 y usar el insert con `ON CONFLICT DO NOTHING` para evitar reenvios.
@@ -376,3 +466,4 @@ Variables SQL opcionales:
 - `CLASS_INTERESTS_SQL`
 - `USERS_BY_INTERESTS_SQL`
 - `NOTIFICATIONS_DEDUPE_SQL`
+- `CLASS_BRIEF_SQL`

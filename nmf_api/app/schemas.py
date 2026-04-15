@@ -159,8 +159,8 @@ class NotificationSendResponse(BaseModel):
 
 class NotificationClassOfferRequest(BaseModel):
     class_id: int = Field(..., ge=1)
-    heading: str
-    content: str
+    heading: str | None = None
+    content: str | None = None
     interest_ids: list[int] | None = None
     data: dict | None = None
     dry_run: bool = False
