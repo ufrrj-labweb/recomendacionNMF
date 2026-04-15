@@ -1,7 +1,7 @@
 services:
   api:
     build:
-      context: ${NMF_CONTEXT:-./recomendaciones/nmf_api}
+      context: ${NMF_CONTEXT}
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
@@ -13,8 +13,8 @@ services:
       ONESIGNAL_API_URL: "https://onesignal.com/api/v1/notifications"
       ONESIGNAL_LANG: "es"
     volumes:
-      - ../classes.json:/data/classes.json:ro
-      - ../vacantes.json:/data/vacantes.json:ro
+      - ${NMF_DATA_DIR}/classes.json:/data/classes.json:ro
+      - ${NMF_DATA_DIR}/vacantes.json:/data/vacantes.json:ro
     networks:
       - cidade-social-net
 networks:
