@@ -88,6 +88,7 @@ Notas:
 - `POST /notifications/offers/brief` -> enviar notificacao com ofertas brief
 - `POST /notifications/send` -> envio geral para OneSignal
 - `POST /notifications/offers/class` -> notificar usuarios pelos interesses da oferta
+- `POST /notifications/offers/auto` -> taguear oferta e notificar usuarios
 
 ## Endpoints de notificacoes (detalhe)
 
@@ -181,6 +182,41 @@ Retorna:
 {
   "total_users": 42,
   "interest_ids": [1, 2, 3],
+  "onesignal": {"id": "..."}
+}
+```
+
+### POST /notifications/offers/auto
+
+O que faz:
+
+- Calcula tags da oferta se nao passar `interest_ids`.
+- Persiste `class_interest` (opcional).
+- Resolve usuarios por interesses e aplica dedupe.
+- Envia OneSignal com brief automatico se nao enviar texto.
+
+Recebe:
+
+```json
+{
+  "class_id": 999,
+  "offer": {"id_acao": "A1", "titulo": "...", "descricao": "..."},
+  "heading": null,
+  "content": null,
+  "interest_ids": null,
+  "persist_interests": true,
+  "data": {"class_id": 999},
+  "dry_run": false
+}
+```
+
+Retorna:
+
+```json
+{
+  "total_users": 42,
+  "interest_ids": [1, 2, 3],
+  "tags": [1, 2, 3],
   "onesignal": {"id": "..."}
 }
 ```
@@ -467,3 +503,4 @@ Variaveis SQL opcionais:
 - `USERS_BY_INTERESTS_SQL`
 - `NOTIFICATIONS_DEDUPE_SQL`
 - `CLASS_BRIEF_SQL`
+- `CLASS_INTERESTS_INSERT_SQL`
