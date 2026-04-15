@@ -170,3 +170,21 @@ class NotificationClassOfferResponse(BaseModel):
     total_users: int
     interest_ids: list[int]
     onesignal: dict
+
+
+class NotificationAutoOfferRequest(BaseModel):
+    class_id: int = Field(..., ge=1)
+    offer: dict
+    heading: str | None = None
+    content: str | None = None
+    interest_ids: list[int] | None = None
+    persist_interests: bool = True
+    data: dict | None = None
+    dry_run: bool = False
+
+
+class NotificationAutoOfferResponse(BaseModel):
+    total_users: int
+    interest_ids: list[int]
+    tags: list[int]
+    onesignal: dict

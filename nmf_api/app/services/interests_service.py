@@ -37,6 +37,12 @@ ON CONFLICT (class_id, user_id) DO NOTHING
 RETURNING user_id
 """
 
+DEFAULT_CLASS_INTERESTS_INSERT_SQL = """
+INSERT INTO class_interest (class_id, interest_id)
+SELECT %s, unnest(%s::int[])
+ON CONFLICT DO NOTHING
+"""
+
 
 def fetch_user_tag_ids(user_id: int) -> list[int]:
     dsn = os.getenv("DATABASE_URL")
@@ -167,3 +173,28 @@ def filter_new_user_ids(class_id: int, user_ids: list[int]) -> list[int]:
         ) from exc
 
     return [int(row[0]) for row in rows]
+
+
+def insert_class_interests(class_id: int, interest_ids: list[int]) -> None:
+    if not interest_ids:
+        return
+
+    dsn = os.getenv("DATABASE_URL")
+    if not dsn:
+        raise HTTPException(
+            status_code=400,
+            detail="Configura DATABASE_URL para guardar intereses de la oferta",
+        )
+
+    query = os.getenv("CLASS_INTERESTS_INSERT_SQL", DEFAULT_CLASS_INTERESTS_INSERT_SQL)
+
+    try:
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (class_id, interest_ids))
+            conn.commit()
+    except psycopg.Error as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al guardar intereses de la oferta: {exc}",
+        ) from exc

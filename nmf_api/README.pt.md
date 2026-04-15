@@ -73,6 +73,24 @@ Notas:
 - Usa `../classes.json` y `../vacantes.json` como volumes em `/data`.
 - Ajuste credenciais e variaveis em `docker-compose.yml`.
 
+## Comando integrado com Cidade Social
+
+Se voce rodar a partir da pasta raiz que contem `cidade-social-compose/` e `recomendaciones/`:
+
+```bash
+NMF_CONTEXT=./recomendaciones/nmf_api \
+NMF_DATA_DIR=./recomendaciones \
+docker compose -f cidade-social-compose/docker-compose.yml -f recomendaciones/nmf_api/docker-compose.yml up -d --build
+```
+
+Se `recomendaciones/` estiver dentro de `cidade-social-compose/`:
+
+```bash
+NMF_CONTEXT=./cidade-social-compose/recomendaciones/nmf_api \
+NMF_DATA_DIR=./cidade-social-compose/recomendaciones \
+docker compose -f cidade-social-compose/docker-compose.yml -f cidade-social-compose/recomendaciones/nmf_api/docker-compose.yml up -d --build
+```
+
 ## Endpoints principais
 
 - `GET /tags` -> lista de etiquetas detectadas
@@ -88,6 +106,7 @@ Notas:
 - `POST /notifications/offers/brief` -> enviar notificacao com ofertas brief
 - `POST /notifications/send` -> envio geral para OneSignal
 - `POST /notifications/offers/class` -> notificar usuarios pelos interesses da oferta
+- `POST /notifications/offers/auto` -> taguear oferta e notificar usuarios
 
 ## Endpoints de notificacoes (detalhe)
 
@@ -181,6 +200,41 @@ Retorna:
 {
   "total_users": 42,
   "interest_ids": [1, 2, 3],
+  "onesignal": {"id": "..."}
+}
+```
+
+### POST /notifications/offers/auto
+
+O que faz:
+
+- Calcula tags da oferta se nao passar `interest_ids`.
+- Persiste `class_interest` (opcional).
+- Resolve usuarios por interesses e aplica dedupe.
+- Envia OneSignal com brief automatico se nao enviar texto.
+
+Recebe:
+
+```json
+{
+  "class_id": 999,
+  "offer": {"id_acao": "A1", "titulo": "...", "descricao": "..."},
+  "heading": null,
+  "content": null,
+  "interest_ids": null,
+  "persist_interests": true,
+  "data": {"class_id": 999},
+  "dry_run": false
+}
+```
+
+Retorna:
+
+```json
+{
+  "total_users": 42,
+  "interest_ids": [1, 2, 3],
+  "tags": [1, 2, 3],
   "onesignal": {"id": "..."}
 }
 ```
@@ -461,9 +515,12 @@ da oferta via `CLASS_BRIEF_SQL`.
 Dedupe (recomendado): criar a tabela `notifications_sent` com chave unica `(class_id, user_id)`
 e usar insert com `ON CONFLICT DO NOTHING` para evitar reenvios.
 
+DDL sugerido em [db/notifications_sent.sql](recomendaciones/nmf_api/db/notifications_sent.sql).
+
 Variaveis SQL opcionais:
 
 - `CLASS_INTERESTS_SQL`
 - `USERS_BY_INTERESTS_SQL`
 - `NOTIFICATIONS_DEDUPE_SQL`
 - `CLASS_BRIEF_SQL`
+- `CLASS_INTERESTS_INSERT_SQL`

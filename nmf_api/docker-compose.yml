@@ -1,33 +1,22 @@
-version: "3.9"
-
 services:
   api:
-    image: ghcr.io/ufrrj-labweb/nmf-api:latest
+    build:
+      context: ${NMF_CONTEXT}
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: "postgresql://nmf:nmf@db:5432/nmf"
+      DATABASE_URL: "postgresql://postgres:postgres@cspostgres2:5432/campsocialdb"
       OFFER_DATA_PATHS: "/data/classes.json,/data/vacantes.json"
       ONESIGNAL_APP_ID: ""
       ONESIGNAL_API_KEY: ""
       ONESIGNAL_API_URL: "https://onesignal.com/api/v1/notifications"
       ONESIGNAL_LANG: "es"
     volumes:
-      - /home/ubuntu/Escritorio/Bruna/recomendaciones/classes.json:/data/classes.json:ro
-      - /home/ubuntu/Escritorio/Bruna/recomendaciones/vacantes.json:/data/vacantes.json:ro
-    depends_on:
-      - db
-
-  db:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_DB: nmf
-      POSTGRES_USER: nmf
-      POSTGRES_PASSWORD: nmf
-    ports:
-      - "5432:5432"
-    volumes:
-      - db_data:/var/lib/postgresql/data
-
-volumes:
-  db_data:
+      - ${NMF_DATA_DIR}/classes.json:/data/classes.json:ro
+      - ${NMF_DATA_DIR}/vacantes.json:/data/vacantes.json:ro
+    networks:
+      - cidade-social-net
+networks:
+  cidade-social-net:
+    external: true
