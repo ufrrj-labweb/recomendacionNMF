@@ -1,8 +1,8 @@
-version: "3.9"
-
 services:
   api:
-    image: ghcr.io/ufrrj-labweb/nmf-api:latest
+    build:
+      context: ${NMF_CONTEXT:-./recomendaciones/nmf_api}
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     environment:
