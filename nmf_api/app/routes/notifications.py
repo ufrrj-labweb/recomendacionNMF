@@ -4,9 +4,12 @@ import os
 
 from fastapi import APIRouter, Depends
 
+from ..data_loader import build_document
 from ..deps import get_tagger
-from ..nmf_classifier import NmfTagger
+from ..nmf_classifier import NmfTagger, OfferRecord
 from ..schemas import (
+    NotificationAutoOfferRequest,
+    NotificationAutoOfferResponse,
     NotificationOffersRequest,
     NotificationOffersResponse,
     NotificationClassOfferRequest,
@@ -19,6 +22,7 @@ from ..services.interests_service import (
     fetch_interest_ids_by_class_id,
     fetch_user_ids_by_interest_ids,
     fetch_user_tag_ids,
+    insert_class_interests,
     filter_new_user_ids,
 )
 from ..services.onesignal_service import send_notification, send_notification_raw
@@ -169,5 +173,86 @@ def notify_users_by_class(
     return NotificationClassOfferResponse(
         total_users=len(user_ids),
         interest_ids=interest_ids,
+        onesignal=onesignal,
+    )
+
+
+@router.post(
+    "/notifications/offers/auto",
+    response_model=NotificationAutoOfferResponse,
+)
+def notify_users_by_offer_auto(
+    payload: NotificationAutoOfferRequest,
+    tagger: NmfTagger = Depends(get_tagger),
+) -> NotificationAutoOfferResponse:
+    interest_ids = payload.interest_ids
+    tags: list[int] = []
+
+    if interest_ids is None:
+        offer_id = str(
+            payload.offer.get("id_acao")
+            or payload.offer.get("id_anuncio_vaga")
+            or payload.offer.get("id_anuncio_acao")
+            or payload.offer.get("id")
+            or payload.class_id
+        )
+        title = str(
+            payload.offer.get("titulo") or payload.offer.get("titulo_curto") or ""
+        )
+        text = build_document(payload.offer)
+        if not text.strip():
+            text = title
+
+        record = OfferRecord(
+            offer_id=offer_id,
+            title=title,
+            text=text,
+            raw=payload.offer,
+        )
+        inferred = tagger.infer([record])
+        tags = inferred[0].get("tags", []) if inferred else []
+        interest_ids = [int(tag_id) for tag_id in tags]
+
+    if not interest_ids:
+        return NotificationAutoOfferResponse(
+            total_users=0, interest_ids=[], tags=tags, onesignal={}
+        )
+
+    if payload.persist_interests:
+        insert_class_interests(payload.class_id, interest_ids)
+
+    user_ids = fetch_user_ids_by_interest_ids(interest_ids)
+    if not user_ids:
+        return NotificationAutoOfferResponse(
+            total_users=0, interest_ids=interest_ids, tags=tags, onesignal={}
+        )
+
+    user_ids = filter_new_user_ids(payload.class_id, user_ids)
+    if not user_ids:
+        return NotificationAutoOfferResponse(
+            total_users=0, interest_ids=interest_ids, tags=tags, onesignal={}
+        )
+
+    heading = payload.heading
+    content = payload.content
+    if not heading or not content:
+        title, description = fetch_class_brief(payload.class_id)
+        heading = heading or title or "Nueva oferta"
+        if not content:
+            content = description or heading
+
+    lang = os.getenv("ONESIGNAL_LANG", "es")
+    onesignal = send_notification_raw(
+        external_user_ids=[str(uid) for uid in user_ids],
+        headings={lang: heading},
+        contents={lang: content},
+        data=payload.data,
+        dry_run=payload.dry_run,
+    )
+
+    return NotificationAutoOfferResponse(
+        total_users=len(user_ids),
+        interest_ids=interest_ids,
+        tags=tags or interest_ids,
         onesignal=onesignal,
     )
