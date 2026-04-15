@@ -73,6 +73,24 @@ Notas:
 - Usa `../classes.json` y `../vacantes.json` como volumenes en `/data`.
 - Ajusta las credenciales y variables en `docker-compose.yml`.
 
+## Comando integrado con Cidade Social
+
+Si corres desde la carpeta raiz que contiene `cidade-social-compose/` y `recomendaciones/`:
+
+```bash
+NMF_CONTEXT=./recomendaciones/nmf_api \
+NMF_DATA_DIR=./recomendaciones \
+docker compose -f cidade-social-compose/docker-compose.yml -f recomendaciones/nmf_api/docker-compose.yml up -d --build
+```
+
+Si `recomendaciones/` esta anidado dentro de `cidade-social-compose/`:
+
+```bash
+NMF_CONTEXT=./cidade-social-compose/recomendaciones/nmf_api \
+NMF_DATA_DIR=./cidade-social-compose/recomendaciones \
+docker compose -f cidade-social-compose/docker-compose.yml -f cidade-social-compose/recomendaciones/nmf_api/docker-compose.yml up -d --build
+```
+
 ## Endpoints principales
 
 - `GET /tags` -> lista de etiquetas detectadas
